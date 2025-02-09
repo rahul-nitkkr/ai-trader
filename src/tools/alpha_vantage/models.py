@@ -6,7 +6,7 @@ from datetime import datetime
 class BaseResponse:
     """Base class for all Alpha Vantage API responses"""
     status_code: int
-    raw_response: Dict[str, Any]
+    raw_response: Optional[Dict[str, Any]] = None
 
 @dataclass
 class NewsArticle:
@@ -24,9 +24,11 @@ class NewsArticle:
     ticker_sentiment: List[Dict[str, Any]]
 
 @dataclass
-class NewsSentimentResponse(BaseResponse):
+class NewsSentimentResponse:
     items: List[NewsArticle]
     total_count: int
+    status_code: int
+    raw_response: Optional[Dict[str, Any]] = None
 
 @dataclass
 class InsiderTransaction:
@@ -34,14 +36,17 @@ class InsiderTransaction:
     filing_date: datetime
     transaction_date: datetime
     transaction_type: str
-    shares: int
+    shares: float
     price: float
+    value: float
     insider_name: str
     insider_title: str
 
 @dataclass
-class InsiderTransactionsResponse(BaseResponse):
+class InsiderTransactionsResponse:
     transactions: List[InsiderTransaction]
+    status_code: int
+    raw_response: Optional[Dict[str, Any]] = None
 
 @dataclass
 class CompanyOverview:

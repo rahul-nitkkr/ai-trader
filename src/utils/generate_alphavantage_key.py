@@ -1,127 +1,70 @@
-import requests
-import random
-import string
-import json
-import re
+#!/usr/bin/env python3
+import os
+import sys
+from pathlib import Path
+import logging
+import webbrowser
+from dotenv import load_dotenv, set_key
 
-def generate_random_email():
-    # Generate random username
-    username_length = random.randint(6, 12)
-    username = ''.join(random.choices(string.ascii_lowercase + string.digits, k=username_length))
-    
-    # Add a random year
-    year = random.randint(1980, 2000)
-    
-    # Random email domains
-    domains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com']
-    domain = random.choice(domains)
-    
-    return f"{username}+{year}@{domain}"
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('AITrader.Utils')
 
-def get_csrf_token():
-    # Create a session to maintain cookies
-    session = requests.Session()
+def update_env_file(api_key: str) -> None:
+    """Update the .env file with the Alpha Vantage API key."""
+    env_path = Path(__file__).parent.parent.parent / '.env'
     
-    # First, get the support page to get the CSRF token
-    support_url = "https://www.alphavantage.co/support/"
-    response = session.get(support_url)
+    if not env_path.exists():
+        logger.error(f".env file not found at {env_path}")
+        sys.exit(1)
     
-    # Extract CSRF token from the cookies
-    csrf_token = session.cookies.get('csrftoken')
-    
-    if not csrf_token:
-        print("Failed to get CSRF token")
-        return None, None
-        
-    return session, csrf_token
+    # Update the .env file
+    set_key(str(env_path), 'ALPHA_VANTAGE_API_KEY', api_key)
+    logger.info("Successfully updated .env file with Alpha Vantage API key")
 
-def extract_api_key(text):
-    # Try different patterns that have been observed in responses
-    patterns = [
-        r'API key: ([A-Z0-9]+)',
-        r'Your API key is: ([A-Z0-9]+)',
-        r'Your dedicated access key is: ([A-Z0-9]+)',
-        r'access key: ([A-Z0-9]+)'
-    ]
+def main():
+    """Main function to help generate and configure Alpha Vantage API key."""
+    logger.info("Alpha Vantage API Key Configuration")
+    logger.info("-" * 40)
     
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1)
-    return None
-
-def generate_api_key():
-    # Get session and CSRF token
-    session, csrf_token = get_csrf_token()
-    if not session or not csrf_token:
-        return None
+    # Check if key already exists
+    load_dotenv()
+    existing_key = os.getenv('ALPHA_VANTAGE_API_KEY')
     
-    url = "https://www.alphavantage.co/create_post/"
-    email = generate_random_email()
+    if existing_key and existing_key != 'your_alpha_vantage_api_key_here':
+        logger.info(f"Found existing Alpha Vantage API key: {existing_key[:5]}...")
+        replace = input("Would you like to replace it? (y/N): ").lower()
+        if replace != 'y':
+            logger.info("Keeping existing API key")
+            return
     
-    # Headers with CSRF token
-    headers = {
-        'accept': '*/*',
-        'accept-language': 'en-GB,en-US;q=0.9,en;q=0.8',
-        'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'origin': 'https://www.alphavantage.co',
-        'referer': 'https://www.alphavantage.co/support/',
-        'x-requested-with': 'XMLHttpRequest',
-        'x-csrftoken': csrf_token
-    }
+    # Open Alpha Vantage website
+    logger.info("Opening Alpha Vantage website to get your free API key...")
+    webbrowser.open('https://www.alphavantage.co/support/#api-key')
     
-    # Form data
-    data = {
-        'csrfmiddlewaretoken': csrf_token,
-        'first_text': 'deprecated',
-        'last_text': 'deprecated',
-        'occupation_text': 'Investor',
-        'organization_text': 'Trading Corp',
-        'email_text': email
-    }
+    # Get API key from user
+    print("\nPlease follow these steps:")
+    print("1. Fill out the form on the Alpha Vantage website")
+    print("2. Check your email for the API key")
+    print("3. Copy and paste your API key below\n")
     
-    try:
-        # Use the session to make the request
-        response = session.post(url, headers=headers, data=data)
-        print(f"Response status code: {response.status_code}")
-        print(f"Response headers: {response.headers}")
-        print(f"Raw response: {response.text}")
-        
-        try:
-            response_data = response.json()
-            print(f"Parsed JSON response: {response_data}")
-            
-            if 'text' in response_data:
-                api_key = extract_api_key(response_data['text'])
-                if api_key:
-                    print(f"Successfully generated API key: {api_key}")
-                    print(f"Email used: {email}")
-                    return api_key
-                else:
-                    print("Could not find API key in response text")
-                    return None
-            else:
-                print("Response doesn't have expected 'text' field")
-                print("Response:", response_data)
-                return None
-                
-        except json.JSONDecodeError:
-            # If JSON parsing fails, try to extract API key directly from HTML response
-            api_key = extract_api_key(response.text)
-            if api_key:
-                print(f"Successfully extracted API key from HTML: {api_key}")
-                print(f"Email used: {email}")
-                return api_key
-            else:
-                print("Could not find API key in response")
-                return None
-            
-    except requests.exceptions.RequestException as e:
-        print(f"Network error: {str(e)}")
-        return None
-    except Exception as e:
-        print(f"Unexpected error: {str(e)}")
-        return None
+    api_key = input("Enter your Alpha Vantage API key: ").strip()
+    
+    if not api_key:
+        logger.error("No API key provided")
+        return
+    
+    # Update .env file
+    update_env_file(api_key)
+    
+    logger.info("\nSetup Complete!")
+    logger.info("You can now use the Alpha Vantage API in your application")
+    logger.info("Try running the server again with:")
+    logger.info("FLASK_ENV=development python -m src.api.server")
+    logger.info("The server will be available at http://localhost:7785")
 
 if __name__ == "__main__":
-    api_key = generate_api_key()
+    main()

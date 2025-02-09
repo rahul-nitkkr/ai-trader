@@ -1,15 +1,65 @@
 from typing import Dict
 import pandas as pd
 import numpy as np
+from datetime import datetime
 from .base_agent import BaseAgent
+from src.tools.alpha_vantage.client import AlphaVantageClient
 
 class ValuationAgent(BaseAgent):
     def __init__(self, show_reasoning: bool = False):
         super().__init__("Valuation Analysis", show_reasoning)
+        # Initialize Alpha Vantage client
+        self.alpha_vantage = AlphaVantageClient()
         # Valuation parameters
         self.required_return = float(0.10)  # 10% required return
         self.perpetual_growth = float(0.03)  # 3% perpetual growth rate
         self.margin_of_safety = float(0.20)  # 20% margin of safety
+        
+    def get_fundamentals(self, symbol: str) -> Dict:
+        """Get fundamental data from Alpha Vantage."""
+        try:
+            # Get company overview
+            overview = self.alpha_vantage.get_company_overview(symbol)
+            
+            # Get income statement
+            income_stmt = self.alpha_vantage.get_income_statement(symbol)
+            latest_income = income_stmt[0] if income_stmt else {}
+            
+            # Get balance sheet
+            balance_sheet = self.alpha_vantage.get_balance_sheet(symbol)
+            latest_balance = balance_sheet[0] if balance_sheet else {}
+            
+            # Get cash flow
+            cash_flow = self.alpha_vantage.get_cash_flow(symbol)
+            latest_cash_flow = cash_flow[0] if cash_flow else {}
+            
+            # Calculate free cash flow growth if we have multiple periods
+            fcf_growth = 0
+            if len(cash_flow) >= 2:
+                current_fcf = float(latest_cash_flow.get('operatingCashflow', 0)) - float(latest_cash_flow.get('capitalExpenditures', 0))
+                prev_fcf = float(cash_flow[1].get('operatingCashflow', 0)) - float(cash_flow[1].get('capitalExpenditures', 0))
+                if prev_fcf > 0:
+                    fcf_growth = (current_fcf - prev_fcf) / prev_fcf
+            
+            # Calculate EBITDA
+            ebitda = float(latest_income.get('ebitda', 0))
+            enterprise_value = float(overview.get('MarketCapitalization', 0)) + float(latest_balance.get('totalDebt', 0)) - float(latest_balance.get('cashAndShortTermInvestments', 0))
+            
+            return {
+                # Overview metrics
+                'market_cap': float(overview.get('MarketCapitalization', 0)),
+                'pe_ratio': float(overview.get('PERatio', 0)),
+                'peg_ratio': float(overview.get('PEGRatio', 0)),
+                'pb_ratio': float(overview.get('PriceToBookRatio', 0)),
+                
+                # Calculated metrics
+                'ev_to_ebitda': enterprise_value / ebitda if ebitda > 0 else 0,
+                'free_cash_flow': float(latest_cash_flow.get('operatingCashflow', 0)) - float(latest_cash_flow.get('capitalExpenditures', 0)),
+                'free_cash_flow_growth': fcf_growth
+            }
+        except Exception as e:
+            self.logger.error(f"Error fetching fundamentals for {symbol}: {str(e)}")
+            return {}
         
     def _calculate_dcf_value(self, fundamentals: Dict) -> float:
         """Calculate Discounted Cash Flow value."""

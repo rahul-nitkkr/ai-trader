@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Dict, Any
 
-from tools.alpha_vantage.models import (
+from .models import (
     InsiderTransaction, InsiderTransactionsResponse
 )
 
@@ -16,36 +16,29 @@ def parse_datetime(date_str: str) -> datetime:
             raise ValueError(f"Unable to parse date: {date_str}")
 
 def parse_insider_transactions(response: Dict[str, Any], status_code: int) -> InsiderTransactionsResponse:
-    """Parse insider transactions response"""
+    """Parse insider transactions response from Alpha Vantage API"""
+    if status_code != 200:
+        raise ValueError(f"API request failed with status code {status_code}")
+        
+    if "Error Message" in response:
+        raise ValueError(f"API error: {response['Error Message']}")
+        
     transactions = []
-    
-    # Check if we have any transactions in the response
-    if not isinstance(response, list):
-        return InsiderTransactionsResponse(
-            status_code=status_code,
-            raw_response=response,
-            transactions=[]
+    for item in response.get("insiderTransactions", []):
+        transaction = InsiderTransaction(
+            symbol=item.get("symbol"),
+            filing_date=datetime.strptime(item.get("filingDate", ""), "%Y-%m-%d"),
+            transaction_date=datetime.strptime(item.get("transactionDate", ""), "%Y-%m-%d"),
+            transaction_type=item.get("transactionType"),
+            shares=float(item.get("shares", 0)),
+            price=float(item.get("price", 0)),
+            value=float(item.get("value", 0)),
+            insider_name=item.get("insiderName"),
+            insider_title=item.get("insiderTitle")
         )
-    
-    for item in response:
-        try:
-            transaction = InsiderTransaction(
-                symbol=item.get('ticker', ''),
-                filing_date=parse_datetime(item.get('transaction_date', '')),  # Using transaction_date as filing_date
-                transaction_date=parse_datetime(item.get('transaction_date', '')),
-                transaction_type='Sale' if item.get('acquisition_or_disposal') == 'D' else 'Purchase',
-                shares=int(float(item.get('shares', '0'))),
-                price=float(item.get('share_price', '0')),
-                insider_name=item.get('executive', ''),
-                insider_title=item.get('executive_title', '')
-            )
-            transactions.append(transaction)
-        except (ValueError, TypeError) as e:
-            print(f"Error parsing transaction: {e}")
-            continue
-    
+        transactions.append(transaction)
+        
     return InsiderTransactionsResponse(
-        status_code=status_code,
-        raw_response=response,
-        transactions=transactions
+        transactions=transactions,
+        status_code=status_code
     ) 

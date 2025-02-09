@@ -3,16 +3,16 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any, Union
 import requests
 
-from tools.alpha_vantage.models import (
+from .models import (
     NewsArticle, NewsSentimentResponse, InsiderTransaction, InsiderTransactionsResponse,
     CompanyOverview, ETFProfile, FinancialStatement, IncomeStatement, BalanceSheet,
     CashFlow, EarningsData, ListingStatus, EarningsCalendarEvent, IPOCalendarEvent
 )
-from tools.alpha_vantage.enums import (
+from .enums import (
     Function, Interval, SeriesType, DataType, SortType, ListingState,
     EarningsHorizon, MAType
 )
-from tools.alpha_vantage.parsers import parse_insider_transactions
+from .parsers import parse_insider_transactions
 
 class AlphaVantageClient:
     """Alpha Vantage API Client"""
@@ -33,6 +33,22 @@ class AlphaVantageClient:
         response = self.session.get(self.BASE_URL, params=params)
         response.raise_for_status()
         return response.json(), response.status_code
+    
+    def get_quote(self, symbol: str) -> Dict[str, Any]:
+        """Get real-time quote for a symbol"""
+        params = {
+            "function": "GLOBAL_QUOTE",
+            "symbol": symbol
+        }
+        response, _ = self._make_request(params)
+        quote_data = response.get("Global Quote", {})
+        return {
+            "price": quote_data.get("05. price", "0"),
+            "volume": quote_data.get("06. volume", "0"),
+            "change": quote_data.get("09. change", "0"),
+            "change_percent": quote_data.get("10. change percent", "0%"),
+            "timestamp": quote_data.get("07. latest trading day", "")
+        }
     
     def get_news_sentiment(
         self,

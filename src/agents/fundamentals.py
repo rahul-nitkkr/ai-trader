@@ -1,11 +1,15 @@
-from typing import Dict
+from typing import Dict, List
 import pandas as pd
 import numpy as np
+from datetime import datetime
 from .base_agent import BaseAgent
+from src.tools.alpha_vantage.client import AlphaVantageClient
 
 class FundamentalsAgent(BaseAgent):
     def __init__(self, show_reasoning: bool = False):
         super().__init__("Fundamentals Analysis", show_reasoning)
+        # Initialize Alpha Vantage client
+        self.alpha_vantage = AlphaVantageClient()
         # Fundamental analysis thresholds
         self.min_current_ratio = 1.5
         self.max_debt_to_equity = 2.0
@@ -15,20 +19,115 @@ class FundamentalsAgent(BaseAgent):
         self.min_roe = 0.12
         self.min_roa = 0.05
         
+    def get_fundamentals(self, symbol: str) -> Dict:
+        """Get fundamental data from Alpha Vantage."""
+        try:
+            # Get company overview
+            overview = self.alpha_vantage.get_company_overview(symbol)
+            if not isinstance(overview, dict):
+                self.logger.error(f"Invalid overview data format for {symbol}")
+                return {}
+            
+            # Get income statement
+            income_stmt = self.alpha_vantage.get_income_statement(symbol)
+            if not isinstance(income_stmt, list) or not income_stmt:
+                self.logger.error(f"Invalid income statement data format for {symbol}")
+                return {}
+            latest_income = income_stmt[0]
+            
+            # Get balance sheet
+            balance_sheet = self.alpha_vantage.get_balance_sheet(symbol)
+            if not isinstance(balance_sheet, list) or not balance_sheet:
+                self.logger.error(f"Invalid balance sheet data format for {symbol}")
+                return {}
+            latest_balance = balance_sheet[0]
+            
+            # Get cash flow
+            cash_flow = self.alpha_vantage.get_cash_flow(symbol)
+            if not isinstance(cash_flow, list) or not cash_flow:
+                self.logger.error(f"Invalid cash flow data format for {symbol}")
+                return {}
+            latest_cash_flow = cash_flow[0]
+            
+            # Calculate growth rates if we have multiple periods
+            revenue_growth = 0
+            earnings_growth = 0
+            fcf_growth = 0
+            
+            if len(income_stmt) >= 2:
+                try:
+                    current_revenue = float(latest_income.get('totalRevenue', 0))
+                    prev_revenue = float(income_stmt[1].get('totalRevenue', 0))
+                    if prev_revenue > 0:
+                        revenue_growth = (current_revenue - prev_revenue) / prev_revenue
+                    
+                    current_earnings = float(latest_income.get('netIncome', 0))
+                    prev_earnings = float(income_stmt[1].get('netIncome', 0))
+                    if prev_earnings > 0:
+                        earnings_growth = (current_earnings - prev_earnings) / prev_earnings
+                except (ValueError, TypeError) as e:
+                    self.logger.error(f"Error calculating growth rates: {str(e)}")
+            
+            if len(cash_flow) >= 2:
+                try:
+                    current_fcf = float(latest_cash_flow.get('operatingCashflow', 0)) - float(latest_cash_flow.get('capitalExpenditures', 0))
+                    prev_fcf = float(cash_flow[1].get('operatingCashflow', 0)) - float(cash_flow[1].get('capitalExpenditures', 0))
+                    if prev_fcf > 0:
+                        fcf_growth = (current_fcf - prev_fcf) / prev_fcf
+                except (ValueError, TypeError) as e:
+                    self.logger.error(f"Error calculating FCF growth: {str(e)}")
+            
+            # Helper function to safely convert to float
+            def safe_float(value, default=0.0):
+                try:
+                    return float(value) if value is not None else default
+                except (ValueError, TypeError):
+                    return default
+            
+            return {
+                # Overview metrics
+                'market_cap': safe_float(overview.get('MarketCapitalization')),
+                'pe_ratio': safe_float(overview.get('PERatio')),
+                'peg_ratio': safe_float(overview.get('PEGRatio')),
+                'profit_margins': safe_float(overview.get('ProfitMargin')),
+                'operating_margin': safe_float(overview.get('OperatingMarginTTM')),
+                'roa': safe_float(overview.get('ReturnOnAssetsTTM')),
+                'roe': safe_float(overview.get('ReturnOnEquityTTM')),
+                'revenue_ttm': safe_float(overview.get('RevenueTTM')),
+                'gross_profit_ttm': safe_float(overview.get('GrossProfitTTM')),
+                
+                # Balance sheet metrics
+                'current_ratio': safe_float(latest_balance.get('currentRatio')),
+                'debt_to_equity': safe_float(latest_balance.get('totalDebt')) / safe_float(latest_balance.get('totalShareholderEquity'), 1),
+                'total_assets': safe_float(latest_balance.get('totalAssets')),
+                'total_debt': safe_float(latest_balance.get('totalDebt')),
+                
+                # Income statement metrics
+                'revenue': safe_float(latest_income.get('totalRevenue')),
+                'gross_profit': safe_float(latest_income.get('grossProfit')),
+                'operating_income': safe_float(latest_income.get('operatingIncome')),
+                'net_income': safe_float(latest_income.get('netIncome')),
+                
+                # Cash flow metrics
+                'operating_cash_flow': safe_float(latest_cash_flow.get('operatingCashflow')),
+                'free_cash_flow': safe_float(latest_cash_flow.get('operatingCashflow')) - safe_float(latest_cash_flow.get('capitalExpenditures')),
+                
+                # Growth metrics
+                'revenue_growth': revenue_growth,
+                'earnings_growth': earnings_growth,
+                'fcf_growth': fcf_growth
+            }
+        except Exception as e:
+            self.logger.error(f"Error fetching fundamentals for {symbol}: {str(e)}")
+            return {}
+    
     def _calculate_growth_rates(self, fundamentals: Dict) -> Dict:
         """Calculate year-over-year growth rates."""
-        metrics = {}
-        
-        if fundamentals.get('revenue_growth'):
-            metrics['revenue_growth'] = fundamentals['revenue_growth']
-        
-        if fundamentals.get('earnings_growth'):
-            metrics['earnings_growth'] = fundamentals['earnings_growth']
-            
-        if fundamentals.get('free_cash_flow_growth'):
-            metrics['fcf_growth'] = fundamentals['free_cash_flow_growth']
-            
-        return metrics
+        return {
+            'revenue_growth': fundamentals.get('revenue_growth', 0),
+            'earnings_growth': fundamentals.get('earnings_growth', 0),
+            'fcf_growth': fundamentals.get('fcf_growth', 0)
+        }
         
     def analyze(self, symbol: str, data: pd.DataFrame) -> Dict:
         """Analyze company fundamentals."""
